@@ -440,3 +440,34 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+void dotprinter(int level, int indexid) {
+    int dotcnt = 3 - level;
+    for (int j = 0; j < dotcnt - 1; j++) {
+        printf(".. ");
+    }
+    printf("..%d: ");
+}
+
+void vmprinthelper(pagetable_t pagetable, int level) {
+    if (level < 0) {
+        return;
+    }
+
+    for (int i = 0; i < 512; i++) {
+        pte_t pte = pagetable[i];
+        if ((pte & PTE_V) == 0) // invalid pte
+            continue;
+        dotprinter(level, i);
+        // printf(" pte %p pa %p useraccessable: %d \n", pte, PTE2PA(pte), (pte & PTE_U));
+        printf(" pte %p pa %p\n", pte, PTE2PA(pte));
+        vmprinthelper((pagetable_t)PTE2PA(pte), level - 1);
+    }
+}
+
+void
+vmprint(pagetable_t  pagetable)
+{
+    printf("page table %p\n", pagetable);
+    vmprinthelper(pagetable, 2);
+}
