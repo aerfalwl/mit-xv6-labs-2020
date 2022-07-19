@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
 /*
  * the kernel's page table.
  */
@@ -46,6 +47,36 @@ kvminit()
   // the highest virtual address in the kernel.
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
+pagetable_t
+kvmbuild(void)
+{
+    pagetable_t  pagetable = (pagetable_t) kalloc();
+    memset(pagetable, 0, PGSIZE);
+
+    // uart registers
+    mappages(pagetable, UART0, PGSIZE, UART0, PTE_R | PTE_W);
+
+    // virtio mmio disk interface
+    mappages(pagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W);
+
+    // CLINT
+    mappages(pagetable, CLINT, 0x10000, CLINT, PTE_R | PTE_W);
+
+    // PLIC
+    mappages(pagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W);
+
+    // map kernel text executable and read-only.
+    mappages(pagetable, KERNBASE, (uint64)etext-KERNBASE, KERNBASE, PTE_R | PTE_X);
+
+    // map kernel data and the physical RAM we'll make use of.
+    mappages(pagetable, (uint64)etext, PHYSTOP-(uint64)etext, (uint64)etext, PTE_R | PTE_W);
+
+    // map the trampoline for trap entry/exit to
+    // the highest virtual address in the kernel.
+    mappages(pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X);
+
+    return pagetable;
+}
 
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
@@ -68,6 +99,8 @@ kvminithart()
 //   21..29 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
 //    0..11 -- 12 bits of byte offset within the page.
+// 返回该虚拟地址对应的最后一级pagetable的pte指针，之后可直接通过PTE2PA得到
+// 其物理地址
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
@@ -131,8 +164,9 @@ kvmpa(uint64 va)
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
-  
-  pte = walk(kernel_pagetable, va, 0);
+
+  struct proc* p = myproc();
+  pte = walk(p->kernel_pagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
