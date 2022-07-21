@@ -153,7 +153,7 @@ freeproc(struct proc *p)
       uvmunmap(p->kernel_pagetable, p->kstack, 1, 1);
   p->kstack = 0;
   if(p->kernel_pagetable)
-      proc_free_kernel_pagetable(p->kernel_pagetable);
+      proc_free_kernel_pagetable(p->kernel_pagetable, p->sz);
   p->kernel_pagetable = 0;
 
 
@@ -217,15 +217,16 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 }
 
 void
-proc_free_kernel_pagetable(pagetable_t pagetable)
+proc_free_kernel_pagetable(pagetable_t pagetable, uint64 sz)
 {
     uvmunmap(pagetable, UART0, 1, 0);
     uvmunmap(pagetable, VIRTIO0, 1, 0);
-    uvmunmap(pagetable, CLINT, 0x10000/PGSIZE, 0);
+//    uvmunmap(pagetable, CLINT, 0x10000/PGSIZE, 0);
     uvmunmap(pagetable, PLIC, 0x400000/PGSIZE, 0);
     uvmunmap(pagetable, KERNBASE, ((uint64)etext-KERNBASE)/PGSIZE, 0);
     uvmunmap(pagetable, (uint64)etext, (PHYSTOP-(uint64)etext)/PGSIZE, 0);
     uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 0);
 
     freewalk(pagetable);
 }
@@ -264,6 +265,8 @@ userinit(void)
 
   p->state = RUNNABLE;
 
+  uvm2kvm(p->pagetable, p->kernel_pagetable, 0, p->sz);
+
   release(&p->lock);
 }
 
@@ -276,12 +279,14 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
-  if(n > 0){
+  if(n > 0) {
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
-  } else if(n < 0){
+    uvm2kvm(p->pagetable, p->kernel_pagetable, sz - n, sz);
+  } else if(n < 0) {
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    uvmunmap(p->kernel_pagetable, PGROUNDUP(sz), (-n)/PGSIZE, 0);
   }
   p->sz = sz;
   return 0;
@@ -322,6 +327,8 @@ fork(void)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
+
+  uvm2kvm(np->pagetable, np->kernel_pagetable, 0, np->sz);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 

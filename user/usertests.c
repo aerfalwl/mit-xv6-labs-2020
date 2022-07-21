@@ -2588,7 +2588,6 @@ countfree()
 
   close(fds[0]);
   wait((int*)0);
-  
   return n;
 }
 
