@@ -1,0 +1,5 @@
+1. a0-a7; a2
+2. the compiler inlines functions f and g
+3. 0x640
+4. 0x38
+5. He110 World; 0 (the value in register a2)
