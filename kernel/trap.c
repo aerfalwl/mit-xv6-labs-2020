@@ -32,7 +32,8 @@ trapinithart(void)
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
-//
+// 有很多原因都可以让程序运行进入到usertrap函数中来，比如系统调用，
+// 运算时除以0，使用了一个未被映射的虚拟地址，或者是设备中断
 void
 usertrap(void)
 {
@@ -48,20 +49,30 @@ usertrap(void)
   struct proc *p = myproc();
   
   // save user program counter.
+  // 保存用户态的程序计数器的地址至内存，防止内核进程调度其它
+  // 进程导致epc寄存器被更新为新的进程的epc值
   p->trapframe->epc = r_sepc();
-  
+
+
+  // scause寄存器的值为8，说明是系统调用导致的进入usertrap()函数
   if(r_scause() == 8){
     // system call
 
+    // 检查进程是否被杀掉
     if(p->killed)
       exit(-1);
 
     // sepc points to the ecall instruction,
     // but we want to return to the next instruction.
+    // sepc寄存器保存的是用户系统调用前的指令地址，也就是ecall指令的地址
+    // 我们希望从内核态返回用户态时，执行的是ecall下一条指令的地址，所以这里进行
+    // 加4操作
     p->trapframe->epc += 4;
 
     // an interrupt will change sstatus &c registers,
     // so don't enable until done with those registers.
+    // 中断总是会被RISC-V的trap硬件关闭
+    // 但是我们在处理系统调用的时候打开中断，可以使中断更快的服务
     intr_on();
 
     syscall();
@@ -73,6 +84,7 @@ usertrap(void)
     p->killed = 1;
   }
 
+  // 再次检查进程是否被杀掉，如果已经被杀掉，则没必要恢复该进程调用前的contex
   if(p->killed)
     exit(-1);
 
@@ -80,6 +92,7 @@ usertrap(void)
   if(which_dev == 2)
     yield();
 
+  // 返回用户态需要执行的操作
   usertrapret();
 }
 
@@ -94,16 +107,23 @@ usertrapret(void)
   // we're about to switch the destination of traps from
   // kerneltrap() to usertrap(), so turn off interrupts until
   // we're back in user space, where usertrap() is correct.
+  // 关闭中断，因为现在stvec寄存器仍然保存的是指向内核空间trap代码的位置，但是
+  // 我们马上要将其设置为指向用户空间的trap代码的位置，如果当前不关闭中断
+  // 则发生中端时，就是执行用户空间的trap代码，会导致内核出错
   intr_off();
 
   // send syscalls, interrupts, and exceptions to trampoline.S
+  // 设置stvec寄存器指向trampoline代码(可在trampoline.S文件中查看)
+  // 该代码的最后一行是sret指令，会返回用户空间，并将程序计数器设置为sepc寄存器保存的值
+  // 同时，sret指令也会使能中断
   w_stvec(TRAMPOLINE + (uservec - trampoline));
-
   // set up trapframe values that uservec will need when
   // the process next re-enters the kernel.
   p->trapframe->kernel_satp = r_satp();         // kernel page table
   p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
-  p->trapframe->kernel_trap = (uint64)usertrap;
+  p->trapframe->kernel_trap = (uint64)usertrap; // 保存指向usertrap函数的指针，这样trampoline代码才能跳转到这个函数
+  // 从tp寄存器中获取当前cpu的hartid，并保存在trapframe中
+  // 因为用户代码可能会修改这个数字，我们从寄存器中获取原数更加保险
   p->trapframe->kernel_hartid = r_tp();         // hartid for cpuid()
 
   // set up the registers that trampoline.S's sret will use
@@ -116,15 +136,22 @@ usertrapret(void)
   w_sstatus(x);
 
   // set S Exception Program Counter to the saved user pc.
+  // 将sepc寄存器的值设置为我们之间保存的用户程序计数器的值
+  // 这样在trampoline代码最后执行sret指令后，就可以将用户程序计数器设置为sepc的值，
+  // 从而使得用户代码恢复至系统调用后的下一条指令
   w_sepc(p->trapframe->epc);
 
   // tell trampoline.S the user page table to switch to.
+  // 切换至用户的page table
   uint64 satp = MAKE_SATP(p->pagetable);
 
   // jump to trampoline.S at the top of memory, which 
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
+  // 计算出要跳转的汇编地址的代码，这里我们希望跳转至userret函数时，因为其中包括了
+  // 返回用户空间的代码
   uint64 fn = TRAMPOLINE + (userret - trampoline);
+  // 下边的函数调用，将跳转至trampoline.S中，且两个参数分别保存在a0寄存器和a1寄存器
   ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
 }
 
