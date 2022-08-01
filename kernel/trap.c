@@ -69,8 +69,12 @@ usertrap(void)
     // ok
   } else if (r_scause() == 15 || r_scause() == 13) {
     uint64 va = r_stval();
-    if (uvmalloc(p->pagetable, PGROUNDDOWN(va), PGSIZE + PGROUNDDOWN(va)) == 0) {
+    if (va >= p->sz || va < PGROUNDUP(p->trapframe->sp) || va >= MAXVA) { // pagefault的地址大于sbrk的最大值
       p->killed = 1;
+    } else {
+      if (uvmalloc(p->pagetable, PGROUNDDOWN(va), PGSIZE + PGROUNDDOWN(va)) == 0) {
+        p->killed = 1;
+      }
     }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

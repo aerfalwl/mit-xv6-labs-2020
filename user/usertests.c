@@ -2022,7 +2022,7 @@ sbrkbasic(char *s)
     for(b = a; b < a+TOOMUCH; b += 4096){
       *b = 99;
     }
-    
+
     // we should not get here! either sbrk(TOOMUCH)
     // should have failed, or (with lazy allocation)
     // a pagefault should have killed this process.
