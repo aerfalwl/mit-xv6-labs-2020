@@ -150,6 +150,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+//  printf("after fork free page: ");
+//  debugfreepa();
 }
 
 // Create a user page table for a given process,
@@ -258,6 +260,8 @@ growproc(int n)
 int
 fork(void)
 {
+//  printf("before fork free page: ");
+//  debugfreepa();
   int i, pid;
   struct proc *np;
   struct proc *p = myproc();

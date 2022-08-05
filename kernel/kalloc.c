@@ -14,6 +14,8 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+long pa_ref_cnt[ARR_MAX];
+
 struct run {
   struct run *next;
 };
@@ -27,7 +29,17 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  for (int i = 0; i < ARR_MAX; i++) {
+    pa_ref_cnt[i] = 1;
+  }
   freerange(end, (void*)PHYSTOP);
+//  printf("total physical page: %d\n", ARR_MAX);
+//  printf("begin: %p\n", end);
+//  for (int i = 0; i < ARR_MAX; i++) {
+//    if (pa_ref_cnt[i] != 0) {
+//      printf("%d: %d\n", i, pa_ref_cnt[i]);
+//    }
+//  }
 }
 
 void
@@ -51,6 +63,13 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  acquire(&kmem.lock);
+  pa_ref_cnt[ARR_INDEX((uint64)pa)]--;
+  if (pa_ref_cnt[ARR_INDEX((uint64)pa)] > 0) {
+    release(&kmem.lock);
+    return;
+  }
+  release(&kmem.lock);
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -72,11 +91,68 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r) {
     kmem.freelist = r->next;
+    pa_ref_cnt[ARR_INDEX((uint64)r)] = 1;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void
+decrease_cnt(uint64 pa)
+{
+  acquire(&kmem.lock);
+  pa_ref_cnt[ARR_INDEX(pa)]--;
+  release(&kmem.lock);
+}
+
+void
+increase_cnt(uint64 pa)
+{
+  acquire(&kmem.lock);
+  pa_ref_cnt[ARR_INDEX(pa)]++;
+  release(&kmem.lock);
+}
+
+long
+get_ref_cnt(uint64 pa)
+{
+  return pa_ref_cnt[ARR_INDEX(pa)];
+}
+
+void
+debug(void)
+{
+    for (int i = 0; i < ARR_MAX; i++) {
+    if (pa_ref_cnt[i] > 1) {
+      printf("%d: %d\n", i, pa_ref_cnt[i]);
+    }
+  }
+}
+
+void
+debugfreepa(void)
+{
+  uint64 cnt = 0;
+  acquire(&kmem.lock);
+  struct run *r = kmem.freelist;
+  while (r != 0) {
+    cnt++;
+    r = r->next;
+  }
+  printf("freepage when using list length: %d\n", cnt);
+  int cnt2 = 0;
+  char *p;
+  p = (char*)PGROUNDUP((uint64)end);
+  for(; p + PGSIZE <= (char*)PHYSTOP; p += PGSIZE) {
+    if (pa_ref_cnt[ARR_INDEX((uint64)p)] == 0) {
+      cnt2++;
+    }
+  }
+  printf("freepage when using array table %d\n", cnt2);
+  release(&kmem.lock);
 }

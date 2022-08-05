@@ -34,26 +34,25 @@ trapinithart(void)
 // called from trampoline.S
 //
 void
-usertrap(void)
-{
+usertrap(void) {
   int which_dev = 0;
 
-  if((r_sstatus() & SSTATUS_SPP) != 0)
+  if ((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
-  w_stvec((uint64)kernelvec);
+  w_stvec((uint64) kernelvec);
 
   struct proc *p = myproc();
-  
+
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
-  if(r_scause() == 8){
+
+  if (r_scause() == 8) {
     // system call
 
-    if(p->killed)
+    if (p->killed)
       exit(-1);
 
     // sepc points to the ecall instruction,
@@ -65,9 +64,16 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } else if ((which_dev = devintr()) != 0) {
     // ok
-  } else {
+  } else if (r_scause() == 13 || r_scause() == 15) { // page fault
+    uint64 va = r_stval();
+
+    if (cownewpage(p->pagetable, va) < 0) {
+      p->killed = 1;
+//      printf("usertrap(): cow failed\n");
+    }
+  }else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

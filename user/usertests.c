@@ -21,6 +21,7 @@
 
 char buf[BUFSZ];
 char name[3];
+//int freepage = 0;
 
 // what if you pass ridiculous pointers to system calls
 // that read user memory with copyin?
@@ -1067,6 +1068,7 @@ sharedfd(char *s)
     printf("%s: cannot open sharedfd for writing", s);
     exit(1);
   }
+  printf("------------find fork here\n");
   pid = fork();
   memset(buf, pid==0?'c':'p', sizeof(buf));
   for(i = 0; i < N; i++){
@@ -2772,10 +2774,17 @@ main(int argc, char *argv[])
   int free0 = countfree();
   int free1 = 0;
   int fail = 0;
+//  freepage = countfree();
   for (struct test *t = tests; t->s != 0; t++) {
     if((justone == 0) || strcmp(t->s, justone) == 0) {
       if(!run(t->f, t->s))
         fail = 1;
+//      int currfree = countfree();
+//      if (currfree != freepage) {
+//        printf("page delete\n");
+//        break;
+//      }
+//      freepage = currfree;
     }
   }
 
