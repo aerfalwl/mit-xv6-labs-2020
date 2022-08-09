@@ -1,0 +1,2 @@
+Two thread may add an entry to a table bucket concurrently, 
+which leading only one entry is added successfully.
