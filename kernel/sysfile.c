@@ -322,6 +322,29 @@ sys_open(void)
     return -1;
   }
 
+  // 循环找到所有的软连接
+  if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+    int cnt = 0;
+    while (ip->type == T_SYMLINK) {
+      if (readi(ip, 0, (uint64)&path, 0, MAXPATH) == -1) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      iunlockput(ip);
+      if ((ip = namei(path)) == 0) {
+        end_op();
+        return -1;
+      }
+      cnt++;
+      if (10 == cnt) {
+        end_op();
+        return -1; // 超过最大的深度
+      }
+      ilock(ip); //namei不会对inode加锁，所以这里需要手动加锁
+    }
+  }
+
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -482,5 +505,33 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+
+uint64
+sys_symlink(void)
+{
+  char  target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  // create 函数会对inode加锁
+  ip = create(path, T_SYMLINK, 0, 0);
+  if (ip == 0) {
+    end_op();
+    return -1;
+  }
+
+  // 将目标路径写入inode的data block
+  if (writei(ip, 0, (uint64)target, 0, MAXPATH) != MAXPATH) {
+    return -1;
+  }
+  // iput类似于对Inode的ref减一
+  iunlockput(ip);
+  end_op();
   return 0;
 }
