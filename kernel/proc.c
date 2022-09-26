@@ -48,6 +48,7 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->kstack = KSTACK((int) (p - proc));
+      memset(p->vma, 0, sizeof(p->vma));
   }
 }
 
@@ -302,6 +303,13 @@ fork(void)
 
   np->state = RUNNABLE;
 
+  for (int i = 0; i < 16; i++) {
+    if (p->vma[i].valid == 1) {
+      memmove(&(np->vma[i]), &(p->vma[i]), sizeof(struct VMA));
+      filedup(p->vma[i].f);
+    }
+  }
+
   release(&np->lock);
 
   return pid;
@@ -393,6 +401,10 @@ exit(int status)
   p->state = ZOMBIE;
 
   release(&original_parent->lock);
+
+  for (int i = 0; i < 16; i++) {
+    unmap_vma(p->vma[i].addr, p->vma[i].length);
+  }
 
   // Jump into the scheduler, never to return.
   sched();
